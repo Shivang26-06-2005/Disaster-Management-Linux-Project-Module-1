@@ -1,0 +1,166 @@
+# Central server. Works with `podman compose` (rootless) and `docker compose`.
+# Generate .env and certificates first: ./scripts/setup.sh
+name: disaster-sentinel
+
+x-app: &app
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  environment: &app-env
+    AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?Run scripts/setup.sh first}
+    SENTINEL_CONFIG: /app/config/config.json
+  depends_on: &needs-schema
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  db:
+    image: ${DB_IMAGE:-docker.io/timescale/timescaledb:2.17.2-pg16}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sentinel_owner
+      POSTGRES_DB: sentinel
+      POSTGRES_PASSWORD: ${DB_OWNER_PASSWORD:?Run scripts/setup.sh first}
+    volumes:
+      # Host bind keeps data across rebuilds. :Z relabels it for SELinux (slide 14).
+      # On Windows, setup.sh sets DB_DATA to a Docker volume, because PostgreSQL cannot use a Windows folder.
+      - ${DB_DATA:-./data/postgres}:/var/lib/postgresql/data:Z
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel_owner -d sentinel"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: {context: ., dockerfile: deploy/Containerfile, target: core}
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "sentinel.admin", "migrate"]
+    restart: "no"
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg2://sentinel_owner:${DB_OWNER_PASSWORD}@db:5432/sentinel
+      SENTINEL_INGEST_PASSWORD: ${SENTINEL_INGEST_PASSWORD}
+      SENTINEL_ANALYTICS_PASSWORD: ${SENTINEL_ANALYTICS_PASSWORD}
+      SENTINEL_HAZARDS_PASSWORD: ${SENTINEL_HAZARDS_PASSWORD}
+      SENTINEL_RECOVERY_PASSWORD: ${SENTINEL_RECOVERY_PASSWORD}
+      SENTINEL_DASHBOARD_PASSWORD: ${SENTINEL_DASHBOARD_PASSWORD}
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [data]
+
+  ingest:
+    <<: *app
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "uvicorn", "sentinel.services.ingest:app", "--host", "0.0.0.0", "--port", "8444",
+              "--ssl-keyfile", "/certs/server.key", "--ssl-certfile", "/certs/server.crt", "--workers", "2"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg2://sentinel_ingest:${SENTINEL_INGEST_PASSWORD}@db:5432/sentinel
+    volumes: ["./deploy/certs:/certs:ro,Z"]
+    ports: ["${INGEST_BIND:-0.0.0.0}:8444:8444"]
+    networks: [data, public]
+    healthcheck: &tcp-health
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8444),2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  analytics:
+    <<: *app
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "sentinel.services.analytics"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg2://sentinel_analytics:${SENTINEL_ANALYTICS_PASSWORD}@db:5432/sentinel
+      AUDIT_ANCHOR_PATH: /var/lib/sentinel/anchors/anchors.jsonl
+    volumes: ["anchors:/var/lib/sentinel/anchors"]
+    networks: [data]
+
+  hazards:
+    <<: *app
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "sentinel.services.hazards"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg2://sentinel_hazards:${SENTINEL_HAZARDS_PASSWORD}@db:5432/sentinel
+    networks: [data, public]
+
+  recovery:
+    <<: *app
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "sentinel.services.recovery"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg2://sentinel_recovery:${SENTINEL_RECOVERY_PASSWORD}@db:5432/sentinel
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      ALERT_SMS_TO: ${ALERT_SMS_TO:-}
+    networks: [data, public]
+
+  classifier:
+    <<: *app
+    build: {context: ., dockerfile: deploy/Containerfile, target: classifier}
+    image: localhost/sentinel-classifier:latest
+    command: ["python", "-m", "uvicorn", "sentinel.services.classifier:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      <<: *app-env
+      MODEL_DIR: /app/models
+      CLASSIFIER_TOKEN: ${CLASSIFIER_TOKEN}
+    depends_on: {}
+    networks: [ml]
+
+  dashboard:
+    <<: *app
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "uvicorn", "sentinel.services.dashboard:app", "--host", "0.0.0.0", "--port", "8443",
+              "--ssl-keyfile", "/certs/server.key", "--ssl-certfile", "/certs/server.crt"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg2://sentinel_dashboard:${SENTINEL_DASHBOARD_PASSWORD}@db:5432/sentinel
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET}
+      CLASSIFIER_URL: http://classifier:8002
+      CLASSIFIER_TOKEN: ${CLASSIFIER_TOKEN}
+      REPORT_IMAGE_DIR: /var/lib/sentinel/report_images
+      AUDIT_ANCHOR_PATH: /var/lib/sentinel/anchors/anchors.jsonl
+    volumes:
+      - "./deploy/certs:/certs:ro,Z"
+      - "report_images:/var/lib/sentinel/report_images"
+      - "anchors:/var/lib/sentinel/anchors:ro"
+    ports: ["${DASHBOARD_BIND:-127.0.0.1}:8443:8443"]
+    networks: [data, ml, public]
+    healthcheck:
+      <<: *tcp-health
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8443),2)"]
+
+  # Optional agent in a container, for a demo with no Linux machine: ./scripts/demo.sh start
+  demo-agent:
+    <<: *app
+    profiles: [demo]
+    image: localhost/sentinel-core:latest
+    command: ["python", "-m", "sentinel.agent.daemon", "--config", "/app/deploy/demo-agent.json"]
+    environment:
+      SENTINEL_AGENT_TOKEN: ${DEMO_NODE_TOKEN:-}
+    volumes: ["./deploy/certs:/certs:ro,Z"]
+    depends_on:
+      ingest: {condition: service_healthy}
+    networks: [public]
+
+volumes:
+  pgdata:
+  anchors:
+  report_images:
+
+networks:
+  data: {internal: true}   # Only components reach the database.
+  ml: {internal: true}     # Only the dashboard reaches the model.
+  public: {}               # Exposed ports and outbound feeds.

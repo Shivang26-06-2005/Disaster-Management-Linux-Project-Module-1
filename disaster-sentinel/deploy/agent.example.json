@@ -1,0 +1,17 @@
+{
+  "server": "__SERVER__",
+  "token_file": "/etc/sentinel/token",
+  "ca_file": "/etc/sentinel/ca.crt",
+  "interval_s": 5,
+  "send_every_s": 10,
+  "recovery_mode": "dry_run",
+  "recovery_script": "/opt/sentinel/recovery.sh",
+  "use_sudo": true,
+  "allowed_actions": ["preserve_evidence", "backup_snapshot", "clear_cache", "restart_service"],
+  "allowed_services": ["nginx", "apache2", "postgresql", "docker"],
+  "allow_isolate": false,
+  "protected_cidrs": ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10"],
+  "log_files": ["/var/log/syslog", "/var/log/auth.log"],
+  "spool_dir": "/var/lib/sentinel/spool",
+  "spool_max_batches": 8640
+}

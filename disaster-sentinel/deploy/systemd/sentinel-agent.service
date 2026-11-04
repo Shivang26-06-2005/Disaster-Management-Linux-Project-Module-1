@@ -1,0 +1,28 @@
+[Unit]
+Description=Disaster Sentinel edge agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=sentinel
+Group=sentinel
+Environment=PYTHONPATH=/opt/sentinel/lib
+ExecStart=/opt/sentinel/venv/bin/python -m sentinel.agent.daemon --config /etc/sentinel/agent.json
+# Slide 4: fault-tolerant execution and auto-recovery.
+Restart=always
+RestartSec=5
+# Slide 4: low overhead, enforced by the kernel and not just promised.
+CPUQuota=10%
+MemoryMax=128M
+Nice=10
+# Hardening. NoNewPrivileges stays off because recovery.sh is reached through sudo.
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

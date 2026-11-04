@@ -1,0 +1,58 @@
+{
+  "nab_cpu": {
+    "series": 8,
+    "samples": 32256,
+    "fixed_threshold_90": {
+      "windows_found": "4/12",
+      "alerts_inside_windows": 426,
+      "alerts_outside_windows": 3035,
+      "alert_precision": 0.123
+    },
+    "zscore_no_floor": {
+      "windows_found": "4/12",
+      "alerts_inside_windows": 29,
+      "alerts_outside_windows": 128,
+      "alert_precision": 0.185
+    },
+    "zscore_with_deck_floor_70": {
+      "windows_found": "3/12",
+      "alerts_inside_windows": 21,
+      "alerts_outside_windows": 53,
+      "alert_precision": 0.284
+    }
+  },
+  "loghub_linux_2k": {
+    "lines": 2000,
+    "matches_by_class": {
+      "auth_failed": 490
+    },
+    "matches_by_signature": {
+      "ssh_auth_failed": 490
+    },
+    "top_ips": [
+      [
+        "150.183.249.110",
+        80
+      ],
+      [
+        "207.243.167.114",
+        23
+      ],
+      [
+        "60.30.224.116",
+        20
+      ],
+      [
+        "195.129.24.210",
+        15
+      ],
+      [
+        "218.188.2.4",
+        14
+      ]
+    ],
+    "example_per_signature": {
+      "ssh_auth_failed": "Jun 14 15:16:01 combo sshd(pam_unix)[19939]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4 "
+    }
+  }
+}

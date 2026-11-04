@@ -1,0 +1,14 @@
+{
+  "server": "https://ingest:8444",
+  "ca_file": "/certs/ca.crt",
+  "interval_s": 5,
+  "send_every_s": 5,
+  "recovery_mode": "dry_run",
+  "recovery_script": "/app/scripts/recovery.sh",
+  "allowed_actions": ["preserve_evidence", "backup_snapshot", "clear_cache", "restart_service", "isolate_ip"],
+  "allowed_services": ["nginx"],
+  "allow_isolate": true,
+  "log_files": [],
+  "use_journal_if_no_files": false,
+  "spool_dir": "/tmp/spool"
+}

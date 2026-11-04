@@ -1,0 +1,326 @@
+# Kubernetes version of compose.yaml. Create the secret and config map first, see the README.
+# Change the two image names to wherever you pushed the images.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sentinel
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: sentinel}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: db-from-components, namespace: sentinel}
+spec:
+  podSelector: {matchLabels: {app: db}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {tier: component}}
+      ports: [{port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: classifier-from-dashboard, namespace: sentinel}
+spec:
+  podSelector: {matchLabels: {app: classifier}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: dashboard}}
+      ports: [{port: 8002}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: public-endpoints, namespace: sentinel}
+spec:
+  podSelector: {matchExpressions: [{key: app, operator: In, values: [ingest, dashboard]}]}
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{port: 8443}, {port: 8444}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: db, namespace: sentinel}
+spec:
+  serviceName: db
+  replicas: 1
+  selector: {matchLabels: {app: db}}
+  template:
+    metadata: {labels: {app: db}}
+    spec:
+      containers:
+        - name: db
+          image: docker.io/timescale/timescaledb:2.17.2-pg16
+          env:
+            - {name: POSTGRES_USER, value: sentinel_owner}
+            - {name: POSTGRES_DB, value: sentinel}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: sentinel, key: DB_OWNER_PASSWORD}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -U, sentinel_owner, -d, sentinel]}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 50Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: db, namespace: sentinel}
+spec:
+  clusterIP: None
+  selector: {app: db}
+  ports: [{port: 5432}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: migrate, namespace: sentinel}
+spec:
+  backoffLimit: 10
+  template:
+    metadata: {labels: {app: migrate, tier: component}}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/OWNER/sentinel-core:latest
+          command: [python, -m, sentinel.admin, migrate]
+          envFrom: [{secretRef: {name: sentinel}}]
+          env:
+            - {name: DATABASE_URL, value: "postgresql+psycopg2://sentinel_owner:$(DB_OWNER_PASSWORD)@db:5432/sentinel"}
+          volumeMounts: [{name: config, mountPath: /app/config, readOnly: true}]
+      volumes:
+        - name: config
+          configMap: {name: sentinel-config}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: ingest, namespace: sentinel}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: ingest}}
+  template:
+    metadata: {labels: {app: ingest, tier: component}}
+    spec:
+      containers:
+        - name: ingest
+          image: ghcr.io/OWNER/sentinel-core:latest
+          command: [python, -m, uvicorn, sentinel.services.ingest:app, --host, 0.0.0.0, --port, "8444",
+                    --ssl-keyfile, /certs/tls.key, --ssl-certfile, /certs/tls.crt]
+          ports: [{containerPort: 8444}]
+          env:
+            - name: SENTINEL_INGEST_PASSWORD
+              valueFrom: {secretKeyRef: {name: sentinel, key: SENTINEL_INGEST_PASSWORD}}
+            - name: AUDIT_HMAC_KEY
+              valueFrom: {secretKeyRef: {name: sentinel, key: AUDIT_HMAC_KEY}}
+            - {name: DATABASE_URL, value: "postgresql+psycopg2://sentinel_ingest:$(SENTINEL_INGEST_PASSWORD)@db:5432/sentinel"}
+          readinessProbe:
+            tcpSocket: {port: 8444}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /app/config, readOnly: true}
+            - {name: tls, mountPath: /certs, readOnly: true}
+      volumes:
+        - {name: config, configMap: {name: sentinel-config}}
+        - {name: tls, secret: {secretName: sentinel-tls}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ingest, namespace: sentinel}
+spec:
+  type: LoadBalancer
+  selector: {app: ingest}
+  ports: [{port: 8444, targetPort: 8444}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: analytics, namespace: sentinel}
+spec:
+  replicas: 2   # One works and the other waits on the database lock as a hot standby.
+  selector: {matchLabels: {app: analytics}}
+  template:
+    metadata: {labels: {app: analytics, tier: component}}
+    spec:
+      containers:
+        - name: analytics
+          image: ghcr.io/OWNER/sentinel-core:latest
+          command: [python, -m, sentinel.services.analytics]
+          env:
+            - name: SENTINEL_ANALYTICS_PASSWORD
+              valueFrom: {secretKeyRef: {name: sentinel, key: SENTINEL_ANALYTICS_PASSWORD}}
+            - name: AUDIT_HMAC_KEY
+              valueFrom: {secretKeyRef: {name: sentinel, key: AUDIT_HMAC_KEY}}
+            - {name: DATABASE_URL, value: "postgresql+psycopg2://sentinel_analytics:$(SENTINEL_ANALYTICS_PASSWORD)@db:5432/sentinel"}
+            - {name: AUDIT_ANCHOR_PATH, value: /anchors/anchors.jsonl}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /app/config, readOnly: true}
+            - {name: anchors, mountPath: /anchors}
+      volumes:
+        - {name: config, configMap: {name: sentinel-config}}
+        - {name: anchors, persistentVolumeClaim: {claimName: sentinel-anchors}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: sentinel-anchors, namespace: sentinel}
+spec:
+  accessModes: [ReadWriteMany]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: hazards, namespace: sentinel}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: hazards}}
+  template:
+    metadata: {labels: {app: hazards, tier: component}}
+    spec:
+      containers:
+        - name: hazards
+          image: ghcr.io/OWNER/sentinel-core:latest
+          command: [python, -m, sentinel.services.hazards]
+          env:
+            - name: SENTINEL_HAZARDS_PASSWORD
+              valueFrom: {secretKeyRef: {name: sentinel, key: SENTINEL_HAZARDS_PASSWORD}}
+            - name: AUDIT_HMAC_KEY
+              valueFrom: {secretKeyRef: {name: sentinel, key: AUDIT_HMAC_KEY}}
+            - {name: DATABASE_URL, value: "postgresql+psycopg2://sentinel_hazards:$(SENTINEL_HAZARDS_PASSWORD)@db:5432/sentinel"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: config, mountPath: /app/config, readOnly: true}]
+      volumes: [{name: config, configMap: {name: sentinel-config}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: recovery, namespace: sentinel}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: recovery}}
+  template:
+    metadata: {labels: {app: recovery, tier: component}}
+    spec:
+      containers:
+        - name: recovery
+          image: ghcr.io/OWNER/sentinel-core:latest
+          command: [python, -m, sentinel.services.recovery]
+          env:
+            - name: SENTINEL_RECOVERY_PASSWORD
+              valueFrom: {secretKeyRef: {name: sentinel, key: SENTINEL_RECOVERY_PASSWORD}}
+            - name: AUDIT_HMAC_KEY
+              valueFrom: {secretKeyRef: {name: sentinel, key: AUDIT_HMAC_KEY}}
+            - {name: DATABASE_URL, value: "postgresql+psycopg2://sentinel_recovery:$(SENTINEL_RECOVERY_PASSWORD)@db:5432/sentinel"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: config, mountPath: /app/config, readOnly: true}]
+      volumes: [{name: config, configMap: {name: sentinel-config}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: classifier, namespace: sentinel}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: classifier}}
+  template:
+    metadata: {labels: {app: classifier}}
+    spec:
+      containers:
+        - name: classifier
+          image: ghcr.io/OWNER/sentinel-classifier:latest
+          command: [python, -m, uvicorn, sentinel.services.classifier:app, --host, 0.0.0.0, --port, "8002"]
+          ports: [{containerPort: 8002}]
+          env:
+            - {name: MODEL_DIR, value: /app/models}
+            - name: CLASSIFIER_TOKEN
+              valueFrom: {secretKeyRef: {name: sentinel, key: CLASSIFIER_TOKEN}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: classifier, namespace: sentinel}
+spec:
+  selector: {app: classifier}
+  ports: [{port: 8002}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: dashboard, namespace: sentinel}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: dashboard}}
+  template:
+    metadata: {labels: {app: dashboard, tier: component}}
+    spec:
+      containers:
+        - name: dashboard
+          image: ghcr.io/OWNER/sentinel-core:latest
+          command: [python, -m, uvicorn, sentinel.services.dashboard:app, --host, 0.0.0.0, --port, "8443",
+                    --ssl-keyfile, /certs/tls.key, --ssl-certfile, /certs/tls.crt]
+          ports: [{containerPort: 8443}]
+          envFrom: [{secretRef: {name: sentinel}}]
+          env:
+            - {name: DATABASE_URL, value: "postgresql+psycopg2://sentinel_dashboard:$(SENTINEL_DASHBOARD_PASSWORD)@db:5432/sentinel"}
+            - {name: CLASSIFIER_URL, value: "http://classifier:8002"}
+            - {name: REPORT_IMAGE_DIR, value: /reports}
+            - {name: AUDIT_ANCHOR_PATH, value: /anchors/anchors.jsonl}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /app/config, readOnly: true}
+            - {name: tls, mountPath: /certs, readOnly: true}
+            - {name: reports, mountPath: /reports}
+            - {name: anchors, mountPath: /anchors, readOnly: true}
+      volumes:
+        - {name: config, configMap: {name: sentinel-config}}
+        - {name: tls, secret: {secretName: sentinel-tls}}
+        - {name: reports, persistentVolumeClaim: {claimName: sentinel-reports}}
+        - {name: anchors, persistentVolumeClaim: {claimName: sentinel-anchors}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: sentinel-reports, namespace: sentinel}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 10Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: dashboard, namespace: sentinel}
+spec:
+  selector: {app: dashboard}
+  ports: [{port: 8443, targetPort: 8443}]

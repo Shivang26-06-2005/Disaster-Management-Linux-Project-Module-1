@@ -1,0 +1,30 @@
+# One file, two images (slide 4: modular packaging). Works with Podman and Docker.
+#   core        ingest, analytics, hazards, recovery, dashboard
+#   classifier  the AI model, kept apart so the others stay small
+FROM docker.io/library/python:3.13-slim AS base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/src PIP_NO_CACHE_DIR=1
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin sentinel \
+ && mkdir -p /app /tmp /var/lib/sentinel/anchors /var/lib/sentinel/report_images \
+ && chmod 1777 /tmp \
+ && chown -R 10001:10001 /var/lib/sentinel
+WORKDIR /app
+
+FROM base AS core
+COPY requirements/core.txt requirements/agent.txt /tmp/
+RUN pip install -r /tmp/core.txt -r /tmp/agent.txt
+COPY config/ /app/config/
+COPY src/ /app/src/
+# Only for the optional demo agent, which always runs in simulation mode.
+COPY deploy/demo-agent.json /app/deploy/demo-agent.json
+COPY deploy/recovery.demo.conf /etc/sentinel/recovery.conf
+COPY scripts/recovery.sh scripts/drill.py /app/scripts/
+RUN chmod 755 /app/scripts/recovery.sh
+USER 10001
+
+FROM base AS classifier
+COPY requirements/core.txt requirements/ml.txt /tmp/
+RUN pip install -r /tmp/core.txt -r /tmp/ml.txt
+COPY config/ /app/config/
+COPY src/ /app/src/
+COPY models/severity_model.joblib models/mobilenetv2_features.onnx /app/models/
+USER 10001

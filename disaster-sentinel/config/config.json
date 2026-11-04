@@ -1,0 +1,107 @@
+{
+  "profile_version": "1.0.0",
+  "detection": {
+    "window": 720,
+    "min_samples": 60,
+    "z_threshold": 3.0,
+    "min_std": 2.0,
+    "consecutive": 3,
+    "adapt_after": 360,
+    "refire_every": 12,
+    "max_gap_s": 60,
+    "metrics": {
+      "cpu": {"floor": 70.0, "ceiling": 97.0},
+      "mem": {"floor": 80.0, "ceiling": 95.0},
+      "disk": {"floor": 85.0, "ceiling": 95.0}
+    }
+  },
+  "signatures": [
+    {"name": "breach_keyword", "class": "breach", "strength": "hard", "pattern": "\\bBREACH\\b", "ignore_case": false},
+    {"name": "breakin_attempt", "class": "breach", "strength": "hard", "pattern": "POSSIBLE BREAK-IN ATTEMPT", "ignore_case": true},
+    {"name": "rootkit_warning", "class": "breach", "strength": "hard", "pattern": "\\brootkit\\b.*\\b(found|detected|warning)\\b", "ignore_case": true},
+    {"name": "critical_keyword", "class": "critical", "strength": "hard", "pattern": "\\bCRITICAL\\b", "ignore_case": false},
+    {"name": "kernel_panic", "class": "critical", "strength": "hard", "pattern": "\\bkernel panic\\b", "ignore_case": true},
+    {"name": "oom_kill", "class": "critical", "strength": "hard", "pattern": "Out of memory: Kill(ed)? process", "ignore_case": true},
+    {"name": "disk_io_error", "class": "critical", "strength": "hard", "pattern": "(\\bI/O error\\b|EXT4-fs error|XFS .*Corruption|Buffer I/O error)", "ignore_case": true},
+    {"name": "hardware_error", "class": "critical", "strength": "hard", "pattern": "(Hardware Error|Machine check events logged|temperature above threshold)", "ignore_case": true},
+    {"name": "ssh_auth_failed", "class": "auth_failed", "strength": "weak", "pattern": "(Failed password for|authentication failure;.*rhost=)", "ignore_case": true},
+    {"name": "service_failed", "class": "failed", "strength": "weak", "pattern": "(\\bFAILED\\b|Failed to start|\\.service: Failed|\\.service: Main process exited, code=(exited|killed), status=[1-9])", "ignore_case": false}
+  ],
+  "self_log_tags": ["sentinel-agent", "sentinel-recovery"],
+  "correlation": {
+    "window_s": 600,
+    "corroboration_s": 300,
+    "sustained_s": 300,
+    "brute_force_count": 8,
+    "service_failed_count": 3,
+    "heartbeat_silent_s": 60,
+    "auto_resolve_s": 900,
+    "hazard_watch_severity": "severe"
+  },
+  "playbooks": {
+    "cyber_breach": {
+      "certin_type": "Compromise of critical systems/information",
+      "escalate": true,
+      "steps": [{"action": "preserve_evidence", "auto": true}]
+    },
+    "brute_force": {
+      "certin_type": "Unauthorized access of IT systems/data",
+      "escalate": false,
+      "steps": [
+        {"action": "preserve_evidence", "auto": true},
+        {"action": "isolate_ip", "arg_from": "ip", "auto": true}
+      ]
+    },
+    "system_critical": {
+      "certin_type": null,
+      "escalate": true,
+      "steps": [
+        {"action": "preserve_evidence", "auto": true},
+        {"action": "backup_snapshot", "auto": true}
+      ]
+    },
+    "service_failure": {
+      "certin_type": null,
+      "escalate": false,
+      "steps": [{"action": "restart_service", "arg_from": "service", "auto": true}]
+    },
+    "resource_exhaustion": {
+      "certin_type": null,
+      "escalate": false,
+      "steps": [{"action": "clear_cache", "auto": true}]
+    },
+    "hazard_infrastructure": {
+      "certin_type": null,
+      "escalate": true,
+      "steps": [{"action": "backup_snapshot", "auto": true}]
+    },
+    "hazard_watch": {
+      "certin_type": null,
+      "escalate": false,
+      "steps": [{"action": "backup_snapshot", "auto": true}]
+    }
+  },
+  "recovery": {
+    "action_ttl_s": 900,
+    "cooldown_s": 1800,
+    "max_attempts_per_incident": 2
+  },
+  "compliance": {
+    "report_deadline_hours": 6,
+    "retention_days": 180,
+    "max_clock_skew_s": 5,
+    "anchor_every_s": 3600
+  },
+  "hazards": {
+    "usgs_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+    "sachet_url": "https://sachet.ndma.gov.in/cap_public_website/rss/rss_india.xml",
+    "poll_s": 300,
+    "usgs_min_magnitude": 4.0,
+    "hazard_ttl_h": 24,
+    "sachet_max_cap_fetch": 40
+  },
+  "verification": {
+    "corroboration_km": 300,
+    "corroboration_hours": 72
+  }
+}

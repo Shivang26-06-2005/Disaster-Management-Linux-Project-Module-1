@@ -1,0 +1,43 @@
+{
+  "warning": "Simulated data, written by the rule author. Checks logic, not field performance.",
+  "simulated_runs": 30,
+  "hours_per_run": 12,
+  "baseline_siloed": {
+    "alerts": 371,
+    "false_alerts": 215,
+    "false_alerts_per_day": 14.3,
+    "alert_precision": 0.42,
+    "incidents_found": 120,
+    "incidents_total": 120,
+    "incident_recall": 1.0,
+    "median_detection_delay_s": 0.0,
+    "found_by_kind": {
+      "breach": "16/16",
+      "brute": "11/11",
+      "exhaustion": "17/17",
+      "outage": "18/18",
+      "panic": "13/13",
+      "quake_damage": "15/15",
+      "subtle_slow_login_attack": "30/30"
+    }
+  },
+  "proposed_correlation": {
+    "alerts": 122,
+    "false_alerts": 31,
+    "false_alerts_per_day": 2.1,
+    "alert_precision": 0.746,
+    "incidents_found": 89,
+    "incidents_total": 120,
+    "incident_recall": 0.742,
+    "median_detection_delay_s": 30,
+    "found_by_kind": {
+      "breach": "16/16",
+      "brute": "11/11",
+      "exhaustion": "16/17",
+      "outage": "17/18",
+      "panic": "13/13",
+      "quake_damage": "15/15",
+      "subtle_slow_login_attack": "1/30"
+    }
+  }
+}

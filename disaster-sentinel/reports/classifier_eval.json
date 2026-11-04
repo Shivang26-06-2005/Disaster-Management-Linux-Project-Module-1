@@ -1,0 +1,219 @@
+{
+  "dataset": "CrisisMMD v2.0 damage task, agreed-label split",
+  "sizes": {
+    "train": 2468,
+    "dev": 529,
+    "test": 529
+  },
+  "class_counts_train": {
+    "little_or_no_damage": 333,
+    "mild_damage": 587,
+    "severe_damage": 1548
+  },
+  "leakage_check": {
+    "tweets_in_train_and_test": 68,
+    "images_in_train_and_test": 0
+  },
+  "chosen": {
+    "text_C": 3.0,
+    "image_C": 0.0001,
+    "image_weight": 0.65,
+    "temperature": {
+      "text": 1.3000000000000005,
+      "image": 0.6500000000000001,
+      "fused": 0.5000000000000001
+    }
+  },
+  "cross_validation_macro_f1": {
+    "text_only_best": 0.4612,
+    "image_only_best": 0.494,
+    "fused": 0.5285
+  },
+  "test": {
+    "majority_baseline": {
+      "macro_f1": 0.2571,
+      "weighted_f1": 0.484,
+      "accuracy": 0.6276,
+      "per_class_f1": {
+        "little_or_no_damage": 0.0,
+        "mild_damage": 0.0,
+        "severe_damage": 0.7712
+      },
+      "ece": 0.3724,
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          71
+        ],
+        [
+          0,
+          0,
+          126
+        ],
+        [
+          0,
+          0,
+          332
+        ]
+      ]
+    },
+    "text_only": {
+      "macro_f1": 0.4509,
+      "weighted_f1": 0.5462,
+      "accuracy": 0.5369,
+      "per_class_f1": {
+        "little_or_no_damage": 0.4051,
+        "mild_damage": 0.2642,
+        "severe_damage": 0.6835
+      },
+      "ece": 0.0828,
+      "confusion_matrix": [
+        [
+          32,
+          19,
+          20
+        ],
+        [
+          25,
+          35,
+          66
+        ],
+        [
+          30,
+          85,
+          217
+        ]
+      ]
+    },
+    "image_only": {
+      "macro_f1": 0.5366,
+      "weighted_f1": 0.6244,
+      "accuracy": 0.6106,
+      "per_class_f1": {
+        "little_or_no_damage": 0.4641,
+        "mild_damage": 0.403,
+        "severe_damage": 0.7427
+      },
+      "ece": 0.0368,
+      "confusion_matrix": [
+        [
+          42,
+          15,
+          14
+        ],
+        [
+          33,
+          53,
+          40
+        ],
+        [
+          35,
+          69,
+          228
+        ]
+      ]
+    },
+    "fused": {
+      "macro_f1": 0.5207,
+      "weighted_f1": 0.6198,
+      "accuracy": 0.6144,
+      "per_class_f1": {
+        "little_or_no_damage": 0.4586,
+        "mild_damage": 0.3451,
+        "severe_damage": 0.7585
+      },
+      "ece": 0.0645,
+      "confusion_matrix": [
+        [
+          36,
+          21,
+          14
+        ],
+        [
+          27,
+          44,
+          55
+        ],
+        [
+          23,
+          64,
+          245
+        ]
+      ]
+    }
+  },
+  "test_excluding_tweets_seen_in_train": {
+    "n": 456,
+    "text_macro_f1": 0.4205,
+    "image_macro_f1": 0.5173,
+    "fused_macro_f1": 0.4944
+  },
+  "fused_minus_image": {
+    "difference": -0.0159,
+    "ci95": [
+      -0.0666,
+      0.034
+    ],
+    "a_ci95": [
+      0.4722,
+      0.566
+    ]
+  },
+  "fused_minus_text": {
+    "difference": 0.0698,
+    "ci95": [
+      0.0269,
+      0.1144
+    ],
+    "a_ci95": [
+      0.4722,
+      0.566
+    ]
+  },
+  "leave_one_event_out": {
+    "california_wildfires": {
+      "n": 531,
+      "text_macro_f1": 0.3405,
+      "image_macro_f1": 0.1991,
+      "fused_macro_f1": 0.2615
+    },
+    "hurricane_harvey": {
+      "n": 892,
+      "text_macro_f1": 0.3397,
+      "image_macro_f1": 0.3659,
+      "fused_macro_f1": 0.3959
+    },
+    "hurricane_irma": {
+      "n": 795,
+      "text_macro_f1": 0.2906,
+      "image_macro_f1": 0.5054,
+      "fused_macro_f1": 0.4078
+    },
+    "hurricane_maria": {
+      "n": 862,
+      "text_macro_f1": 0.302,
+      "image_macro_f1": 0.3999,
+      "fused_macro_f1": 0.3881
+    },
+    "iraq_iran_earthquake": {
+      "n": 173,
+      "text_macro_f1": 0.4006,
+      "image_macro_f1": 0.3971,
+      "fused_macro_f1": 0.5049
+    },
+    "mexico_earthquake": {
+      "n": 178,
+      "text_macro_f1": 0.3586,
+      "image_macro_f1": 0.4552,
+      "fused_macro_f1": 0.4011
+    },
+    "srilanka_floods": {
+      "n": 95,
+      "text_macro_f1": 0.4415,
+      "image_macro_f1": 0.3479,
+      "fused_macro_f1": 0.4286
+    }
+  },
+  "train_seconds": 47.7
+}

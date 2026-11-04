@@ -1,0 +1,8 @@
+-r core.txt
+-r ml.txt
+-r agent.txt
+onnx==1.23.2
+pytest==9.1.1
+shellcheck-py
+kubernetes-validate
+pyyaml
